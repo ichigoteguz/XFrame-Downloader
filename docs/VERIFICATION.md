@@ -2,6 +2,16 @@
 
 Implementation and browser validation began November 9, 2026 (America/New_York).
 
+## Emoji export regression — November 20, 2026
+
+Reproduced `URI malformed` on the public site when exporting post `2123796985161322997`. Its ordinary-post display range `[0, 35]` counts Unicode code points. Treating that range as UTF-16 truncated the three trailing laughing emojis to one emoji and an unpaired surrogate, which failed during SVG URI encoding in `html-to-image`.
+
+The provider adapter now converts ordinary-post display ranges and all X facet ranges to JavaScript offsets. Note posts retain FxTwitter's synthesized full UTF-16 display range. Regression coverage includes the reported text, visible-range start/end offsets, link and emphasis mapping after emoji, and media-link removal.
+
+All 69 tests, TypeScript, and the production build passed using the installed Vitest, TypeScript, and Vite executables directly. The pnpm launcher attempted to register the existing project in an inaccessible sandbox store, so validation used those executables without installing or changing dependencies.
+
+The in-app browser loaded the actual post against the fixed local app, displayed all three emojis, and completed its 720p framed MP4 export at 810 × 1606 pixels. The UI confirmed “Your framed video is ready. Download started.” Evidence is saved under ignored `.qa/uri-malformed-fixed.jpg`. This validates the local fix; it does not represent a deployment to GitHub Pages.
+
 ## Executed browser checks
 
 Microsoft Edge 157 on the owner's Windows computer, November 9, 2026 Eastern:

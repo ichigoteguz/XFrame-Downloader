@@ -43,12 +43,14 @@ function codePointOffset(text: string, offset: number): number {
   return index;
 }
 
-function facetRange(text: string, value: unknown, note: boolean): [number, number] | undefined {
+function facetRange(text: string, value: unknown): [number, number] | undefined {
   const indices = array(value);
   if (indices.length !== 2 || indices.some(i => typeof i !== 'number' || !Number.isFinite(i))) return undefined;
   let start = Math.max(0, Math.floor(number(indices[0])));
   let end = Math.max(start, Math.floor(number(indices[1])));
-  if (note) { start = codePointOffset(text, start); end = codePointOffset(text, end); }
+  // X entity offsets count Unicode code points, including on ordinary posts.
+  start = codePointOffset(text, start);
+  end = codePointOffset(text, end);
   start = Math.min(text.length, start);
   end = Math.min(text.length, end);
   if (start > 0 && /[\uDC00-\uDFFF]/.test(text[start] ?? '')) start--;
@@ -64,15 +66,21 @@ function normalizeText(status: Json): Pick<Post, 'text' | 'facets'> {
   const raw = object(status.raw_text);
   const source = string(raw.text, string(status.text));
   const display = array(raw.display_text_range);
-  const viewStart = Math.max(0, Math.min(source.length, number(display[0], 0)));
-  const viewEnd = Math.max(viewStart, Math.min(source.length, number(display[1], source.length)));
+  // FxTwitter passes through X's code-point display range for ordinary posts,
+  // but synthesizes a full UTF-16 range for note posts.
+  const displayOffset = (value: unknown, fallback: number) => {
+    const offset = Math.max(0, Math.floor(number(value, fallback)));
+    return status.is_note_tweet === true ? Math.min(source.length, offset) : codePointOffset(source, offset);
+  };
+  const viewStart = displayOffset(display[0], 0);
+  const viewEnd = Math.max(viewStart, displayOffset(display[1], source.length));
   const quote = object(status.quote);
   const quoteId = string(quote.id);
   const originalFacets: TextFacet[] = [];
   const edits: { start: number; end: number; text: string }[] = [];
   for (const item of array(raw.facets)) {
     const facet = object(item);
-    const range = facetRange(source, facet.indices, status.is_note_tweet === true);
+    const range = facetRange(source, facet.indices);
     if (!range) continue;
     const [start, end] = range;
     if (start < viewStart || end > viewEnd) continue;

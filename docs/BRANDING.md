@@ -17,4 +17,4 @@ The header's Site theme selector offers System, Light, and Dark. System follows 
 
 The original SVG logo family is retained so both themes remain recognizable as the same application. Site artwork and decorative framing stay outside the captured post component. The page retains its dedication and credits: Developed with OpenAI Codex.
 
-The repository and deployment path remain `PostFrame` until the repository is renamed separately. Product names, document title, user-facing errors, download filenames, and license introductions use XFrame Downloader. Historical verification notes retain the names and paths used when those checks ran.
+As of November 20, 2026, the repository and deployment path are `XFrame-Downloader`. Product names, document title, user-facing errors, download filenames, and license introductions use XFrame Downloader. Historical verification notes retain the names and paths used when those checks ran.

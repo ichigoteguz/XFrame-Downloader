@@ -1,6 +1,6 @@
 # XFrame Downloader
 
-**Stable release: [v1.0.0](https://github.com/ichigoteguz/PostFrame/releases/tag/v1.0.0).**
+**Stable release: [v1.0.1](https://github.com/ichigoteguz/XFrame-Downloader/releases/tag/v1.0.1).**
 
 Keep the whole post. Export public X/Twitter posts as images, or download a video playing inside its original post frame.
 
@@ -8,11 +8,11 @@ For that one friend who doesn't want to create a Twitter account, so sharing mem
 
 Developed with OpenAI Codex.
 
-[Open XFrame Downloader](https://ichigoteguz.github.io/PostFrame/)
+[Open XFrame Downloader](https://ichigoteguz.github.io/XFrame-Downloader/)
 
 XFrame Downloader is a static, browser-based app designed for GitHub Pages. Post data comes from [FxEmbed's public FxTwitter API](https://docs.fxembed.com/api/introduction/); media comes from X's media CDN. Files are composed on your device. There are no XFrame Downloader accounts, backend, public download gallery, or stored post history. Loading a post necessarily sends its ID to FxTwitter and retrieves its assets from X.
 
-The product is named XFrame Downloader; the repository and GitHub Pages path remain `PostFrame` so existing links keep working.
+The repository and GitHub Pages path are now `XFrame-Downloader`, matching the product name.
 
 ## Features
 
@@ -35,7 +35,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Open the printed URL ending in `/PostFrame/`. For a production build:
+Open the printed URL ending in `/XFrame-Downloader/`. For a production build:
 
 ```sh
 pnpm test
@@ -53,7 +53,7 @@ Only public posts are supported. Deleted, protected, restricted, external-player
 
 ## Deployment
 
-The public repository deploys to GitHub Pages through GitHub Actions. The workflow tests and builds pushes and pull requests, then deploys successful pushes to `main` (or manual workflow runs). Pull requests do not deploy. Its deploy job runs only for a public repository. `vite.config.ts` uses `/PostFrame/`; change `base` if the repository path changes. No runtime API tokens or build secrets are required. Worker and app assets are bundled and served from the same site.
+The public repository deploys to GitHub Pages through GitHub Actions. The workflow tests and builds pushes and pull requests, then deploys successful pushes to `main` (or manual workflow runs). Pull requests do not deploy. Its deploy job runs only for a public repository. `vite.config.ts` uses `/XFrame-Downloader/`; change `base` if the repository path changes. No runtime API tokens or build secrets are required. Worker and app assets are bundled and served from the same site.
 
 The repository is public and the app is hosted on GitHub Pages. The actual workflow is in `.github/workflows/pages.yml`, with a reference copy under `docs/`.
 
@@ -63,6 +63,6 @@ The provider adapter normalizes FxTwitter v2 into application-owned types. React
 
 ## Development acceptance test
 
-Run the dev server and open `/PostFrame/?benchmark`. The development-only harness generates a synthetic H.264/AAC source, captures a dark frame plus quote, exports an MP4, verifies duration/audio/dimensions, and extracts first/middle/final playback frames. Local artifacts are saved under ignored `.qa/` by a dev-server-only endpoint. The harness and artifact endpoint are absent from the production app.
+Run the dev server and open `/XFrame-Downloader/?benchmark`. The development-only harness generates a synthetic H.264/AAC source, captures a dark frame plus quote, exports an MP4, verifies duration/audio/dimensions, and extracts first/middle/final playback frames. Local artifacts are saved under ignored `.qa/` by a dev-server-only endpoint. The harness and artifact endpoint are absent from the production app.
 
 See [verification notes](docs/VERIFICATION.md) for measured results and remaining limitations. Dependency licenses and source links are listed in [third-party notices](THIRD_PARTY_NOTICES.md).

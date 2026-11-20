@@ -1,3 +1,19 @@
+# v1.0.1 — Emoji export fix
+
+Published November 20, 2026.
+
+- Fixed “URI malformed” when downloading posts containing emoji, including post `2123796985161322997`. Text ranges now preserve complete Unicode characters, and links and formatting after emoji map to the correct text.
+- Updated the GitHub repository links and GitHub Pages asset path for the rename to `XFrame-Downloader`.
+- Includes the distinct Precision Studio light theme and Night Signal dark theme introduced since v1.0.0.
+
+Verification: all 69 tests, TypeScript, and the production build passed. The reported post successfully exported as a 720p framed MP4 in the in-app browser against the fixed local app.
+
+[Open XFrame Downloader](https://ichigoteguz.github.io/XFrame-Downloader/).
+
+Developed with OpenAI Codex.
+
+---
+
 # v1.0.0 — XFrame Downloader
 
 First stable release, published November 10, 2026.

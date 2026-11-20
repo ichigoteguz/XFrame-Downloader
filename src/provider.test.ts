@@ -12,6 +12,30 @@ describe('post URL handling', () => {
 });
 
 describe('provider normalization', () => {
+  it('preserves all three emoji in post 2123796985161322997 without breaking export encoding', () => {
+    const text = 'Que maravilla de publicidad... \n🤣🤣🤣';
+    const result = normalizePost(rawPost({ id: '2123796985161322997', text, is_note_tweet: false, raw_text: { text: `${text} https://t.co/rvm7b3Mc3V`, display_text_range: [0, 35], facets: [{ type: 'media', indices: [36, 59], original: 'https://t.co/rvm7b3Mc3V' }] } }));
+    expect(result.text).toBe(text);
+    expect(() => encodeURIComponent(result.text)).not.toThrow();
+  });
+  it.each([false, true])('maps links and emphasis after emoji on a post with is_note_tweet=%s', is_note_tweet => {
+    const text = '🌿 Read https://t.co/abc now';
+    const result = normalizePost(rawPost({ text, is_note_tweet, raw_text: { text, display_text_range: [0, is_note_tweet ? text.length : [...text].length], facets: [{ type: 'bold', indices: [2, 6] }, { type: 'url', indices: [7, 23], original: 'https://t.co/abc', display: 'example.com', replacement: 'https://example.com' }] } }));
+    expect(result.text).toBe('🌿 Read example.com now');
+    expect(result.text.slice(result.facets[0].start, result.facets[0].end)).toBe('Read');
+    expect(result.text.slice(result.facets[1].start, result.facets[1].end)).toBe('example.com');
+  });
+  it('maps both display boundaries after emoji and rebases visible facets', () => {
+    const text = '🌿 @user 🤣 #hello https://t.co/media';
+    const result = normalizePost(rawPost({ text, raw_text: { text, display_text_range: [8, 16], facets: [{ type: 'mention', indices: [2, 7] }, { type: 'hashtag', indices: [10, 16] }] } }));
+    expect(result.text).toBe('🤣 #hello');
+    expect(result.facets).toEqual([{ type: 'hashtag', start: 3, end: 9 }]);
+  });
+  it('removes attached media after emoji when no display range is supplied', () => {
+    const text = '🤣🤣🤣 https://t.co/media';
+    const result = normalizePost(rawPost({ text, raw_text: { text, facets: [{ type: 'media', indices: [4, [...text].length], original: 'https://t.co/media' }] } }));
+    expect(result.text).toBe('🤣🤣🤣');
+  });
   it('preserves note prose when a stale media facet points into the full note text', () => {
     const text = 'We were reluctant to once again set up our cameras up for yet another “No Show”.';
     const start = text.indexOf('cameras');
