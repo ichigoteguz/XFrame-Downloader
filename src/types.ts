@@ -9,4 +9,4 @@ export const DEFAULT_SETTINGS: ExportSettings = { theme: 'dark', background: 'no
 export interface MediaSelection { postId: string; mediaId: string }
 export interface Aperture { x: number; y: number; width: number; height: number; radius: number }
 export interface FrameSnapshot { blob: Blob; width: number; height: number; aperture?: Aperture }
-export const LIMITS = { videoSeconds: 120, sourceBytes: 100 * 1024 * 1024, videoPixels: 4_000_000, videoSide: 4096, imagePixels: 16_000_000, imageSide: 8192 };
+export const LIMITS = { videoSeconds: 600, sourceBytes: 256 * 1024 * 1024, outputBytes: 512 * 1024 * 1024, videoPixels: 4_000_000, videoSide: 4096, imagePixels: 16_000_000, imageSide: 8192 };

@@ -1,15 +1,13 @@
 import { ALL_FORMATS, BlobSource, EncodedPacketSink, Input } from 'mediabunny';
 import { LIMITS, type FrameSnapshot, type MediaFormat, type PostMedia } from './types';
+import { assertSourceSize, assertOutputSize, assertVideoDuration } from './videoLimits';
+export { assertSourceSize, assertOutputSize, assertVideoDuration } from './videoLimits';
 
 export interface VideoInfo { width: number; height: number; duration: number; hasAudio: boolean; videoCodec: string | null; audioCodec: string | null }
 export interface ExportVideoOptions { signal?: AbortSignal; onProgress?: (fraction: number) => void }
+export interface VideoDownloadProgress { loaded: number; total?: number }
 export interface VideoWorkerRequest { type: 'start'; source: Blob; frame: FrameSnapshot }
 export type VideoWorkerResponse = { type: 'progress'; progress: number } | { type: 'result'; blob: Blob } | { type: 'error'; message: string };
-
-export function assertSourceSize(size: number): void {
-  if (!Number.isFinite(size) || size <= 0) throw new Error('The video file is empty. Try loading the post again.');
-  if (size > LIMITS.sourceBytes) throw new Error('This video is larger than the 100 MiB browser limit. Try a lower quality source.');
-}
 
 export function assertFrame(frame: FrameSnapshot): void {
   const { width, height, aperture } = frame;
@@ -47,8 +45,10 @@ export function selectVideoFormat(media: PostMedia, quality: 720 | 1080): MediaF
   return ranked.sort((a, b) => (b.format.bitrate || 0) - (a.format.bitrate || 0))[0].format;
 }
 
-export async function fetchVideo(media: PostMedia, quality: 720 | 1080, signal?: AbortSignal): Promise<Blob> {
-  if (media.duration && media.duration > LIMITS.videoSeconds + 0.1) throw new Error('Browser video export currently supports clips up to 2 minutes.');
+export async function fetchVideo(media: PostMedia, quality: 720 | 1080, signal?: AbortSignal, onProgress?: (progress: VideoDownloadProgress) => void): Promise<Blob> {
+  if (media.duration && media.duration > 0) assertVideoDuration(media.duration);
+  const checkCanceled = () => { if (signal?.aborted) throw new DOMException('Export canceled.', 'AbortError'); };
+  checkCanceled();
   const format = selectVideoFormat(media, quality);
   const url = new URL(format.url, location.href);
   if (url.protocol !== 'https:' || !/(^|\.)twimg\.com$/.test(url.hostname)) throw new Error('The post provider returned an unsupported video source.');
@@ -59,42 +59,55 @@ export async function fetchVideo(media: PostMedia, quality: 720 | 1080, signal?:
     if (signal?.aborted) throw new DOMException('Export canceled.', 'AbortError');
     throw new Error('The video could not be downloaded from X. Its media server may be unavailable or blocking browser access.');
   }
+  checkCanceled();
   if (!response.ok) throw new Error(`X could not serve this video (${response.status}). Try reloading the post.`);
   const contentLength = Number(response.headers.get('content-length'));
-  if (contentLength > LIMITS.sourceBytes) { await response.body?.cancel(); assertSourceSize(contentLength); }
-  if (!response.body) { const blob = await response.blob(); assertSourceSize(blob.size); return blob; }
+  if (contentLength > LIMITS.sourceBytes) { await response.body?.cancel().catch(() => undefined); assertSourceSize(contentLength); }
+  const total = Number.isFinite(contentLength) && contentLength > 0 ? contentLength : undefined;
+  onProgress?.({ loaded: 0, total });
+  if (!response.body) { const blob = await response.blob(); checkCanceled(); assertSourceSize(blob.size); onProgress?.({ loaded: blob.size, total }); return blob; }
   const reader = response.body.getReader();
   const chunks: Uint8Array<ArrayBuffer>[] = [];
   let size = 0;
+  let nextProgress = 1024 * 1024;
+  const abortDownload = () => { void reader.cancel().catch(() => undefined); };
+  signal?.addEventListener('abort', abortDownload, { once: true });
   try {
     while (true) {
+      checkCanceled();
       const { done, value } = await reader.read();
+      checkCanceled();
       if (done) break;
       size += value.byteLength;
-      if (size > LIMITS.sourceBytes) { await reader.cancel(); assertSourceSize(size); }
+      if (size > LIMITS.sourceBytes) { await reader.cancel().catch(() => undefined); assertSourceSize(size); }
       chunks.push(value as Uint8Array<ArrayBuffer>);
+      if (size >= nextProgress) { onProgress?.({ loaded: size, total }); nextProgress = size + 1024 * 1024; }
     }
-  } finally { reader.releaseLock(); }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    checkCanceled();
+    throw error;
+  } finally { signal?.removeEventListener('abort', abortDownload); reader.releaseLock(); }
   assertSourceSize(size);
+  onProgress?.({ loaded: size, total });
   return new Blob(chunks, { type: 'video/mp4' });
 }
 
-export async function inspectVideo(source: Blob): Promise<VideoInfo> {
-  assertSourceSize(source.size);
+export async function inspectVideo(source: Blob, options: { output?: boolean } = {}): Promise<VideoInfo> {
+  (options.output ? assertOutputSize : assertSourceSize)(source.size);
   const input = new Input({ source: new BlobSource(source), formats: ALL_FORMATS });
   try {
     const video = await input.getPrimaryVideoTrack();
     if (!video) throw new Error('The attachment does not contain a playable video track.');
     const duration = await video.computeDuration();
-    if (!Number.isFinite(duration) || duration <= 0) throw new Error('The video duration could not be read.');
-    if (duration > LIMITS.videoSeconds + 0.1) throw new Error('Browser video export currently supports clips up to 2 minutes.');
+    assertVideoDuration(duration);
     const audio = await input.getPrimaryAudioTrack();
     return { width: video.displayWidth, height: video.displayHeight, duration, hasAudio: Boolean(audio), videoCodec: video.codec, audioCodec: audio?.codec || null };
   } finally { input.dispose(); }
 }
 
 /** QA helper: compare every encoded AAC packet without decoding/re-encoding audio. */
-export async function verifyAudioPassthrough(source: Blob, result: Blob): Promise<{ identical: boolean; packets: number }> {
+export async function verifyAudioPassthrough(source: Blob, result: Blob, signal?: AbortSignal): Promise<{ identical: boolean; packets: number }> {
   const sourceInput = new Input({ source: new BlobSource(source), formats: ALL_FORMATS });
   const resultInput = new Input({ source: new BlobSource(result), formats: ALL_FORMATS });
   try {
@@ -106,6 +119,7 @@ export async function verifyAudioPassthrough(source: Blob, result: Blob): Promis
     const b = new EncodedPacketSink(resultTrack).packets();
     let packets = 0;
     while (true) {
+      if (signal?.aborted) throw new DOMException('Verification canceled.', 'AbortError');
       const [left, right] = await Promise.all([a.next(), b.next()]);
       if (left.done || right.done) return { identical: left.done === right.done, packets };
       if (left.value.data.length !== right.value.data.length || !left.value.data.every((value, index) => value === right.value.data[index])) return { identical: false, packets };

@@ -1,10 +1,15 @@
-import { AudioBufferSource, BufferTarget, CanvasSource, Mp4OutputFormat, Output, Quality, canEncodeAudio, canEncodeVideo } from 'mediabunny';
+import { AudioBufferSource, CanvasSource, Mp4OutputFormat, Output, Quality, canEncodeAudio, canEncodeVideo } from 'mediabunny';
+import { LIMITS } from './types';
+import { createVideoTarget } from './videoTarget';
 
 export interface BenchmarkOptions { signal?: AbortSignal; onProgress?: (progress: number) => void; audio?: boolean; width?: number; height?: number }
 
 /** Generates a deterministic fixture offline. The clock and moving marker reveal dropped endings and frozen frames. */
 export async function createBenchmarkSource(durationSeconds = 120, options: BenchmarkOptions = {}): Promise<Blob> {
-  const seconds = Math.min(120, Math.max(1, durationSeconds));
+  if (!Number.isInteger(durationSeconds) || durationSeconds < 1 || durationSeconds > LIMITS.videoSeconds) throw new Error(`Choose a whole number of seconds from 1 to ${LIMITS.videoSeconds}.`);
+  const seconds = durationSeconds;
+  const checkCancel = () => { if (options.signal?.aborted) throw new DOMException('Fixture generation canceled.', 'AbortError'); };
+  checkCancel();
   const fps = 30;
   const width = options.width || 1280;
   const height = options.height || 720;
@@ -15,13 +20,14 @@ export async function createBenchmarkSource(durationSeconds = 120, options: Benc
   if (withAudio && !await canEncodeAudio('aac', { numberOfChannels: 1, sampleRate: 48000 })) throw new Error('AAC fixture generation is unavailable in this browser. Ordinary AAC source passthrough does not require this encoder.');
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d', { alpha: false })!;
-  const target = new BufferTarget();
+  const { target, getBlob } = createVideoTarget(LIMITS.sourceBytes);
   const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'reserve' }), target });
   const video = new CanvasSource(canvas, { codec: 'avc', quality, keyFrameInterval: 1 });
   const audio = withAudio ? new AudioBufferSource({ codec: 'aac', quality: new Quality({ bitrate: 96_000 }) }) : null;
   output.addVideoTrack(video, { frameRate: fps, maximumPacketCount: frames + 4 });
   if (audio) output.addAudioTrack(audio, { maximumPacketCount: Math.ceil(seconds * 48000 / 1024) + 8 });
-  const checkCancel = () => { if (options.signal?.aborted) throw new DOMException('Fixture generation canceled.', 'AbortError'); };
+  const cancel = () => { void output.cancel().catch(() => undefined); };
+  options.signal?.addEventListener('abort', cancel, { once: true });
   try {
     checkCancel();
     await output.start();
@@ -68,8 +74,14 @@ export async function createBenchmarkSource(durationSeconds = 120, options: Benc
     ]);
     checkCancel();
     await output.finalize();
-    if (!target.buffer) throw new Error('Fixture encoding did not produce a file.');
+    checkCancel();
+    const blob = getBlob();
+    if (!blob.size) throw new Error('Fixture encoding did not produce a file.');
     options.onProgress?.(1);
-    return new Blob([target.buffer], { type: 'video/mp4' });
-  } catch (error) { await output.cancel().catch(() => undefined); throw error; }
+    return blob;
+  } catch (error) {
+    await output.cancel().catch(() => undefined);
+    checkCancel();
+    throw error;
+  } finally { options.signal?.removeEventListener('abort', cancel); }
 }

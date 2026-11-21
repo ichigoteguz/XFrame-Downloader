@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { assertFrame, assertSourceSize, selectVideoFormat, fetchVideo } from './video';
+import { assertFrame, assertSourceSize, assertOutputSize, assertVideoDuration, selectVideoFormat, fetchVideo } from './video';
 import { LIMITS, type PostMedia } from './types';
 
 const media: PostMedia = { id: '1', type: 'video', url: '', thumbnail: '', width: 1080, height: 1920, formats: [
@@ -56,7 +56,19 @@ describe('browser memory and geometry guardrails', () => {
   it('rejects excessive full-frame pixels even when each side is in range', () => expect(() => assertFrame({ ...frame, width: 3000, height: 3000 })).toThrow('too large'));
   it('rejects empty and oversized source files', () => {
     expect(() => assertSourceSize(0)).toThrow('empty');
-    expect(() => assertSourceSize(LIMITS.sourceBytes + 1)).toThrow('100 MiB');
+    expect(() => assertSourceSize(LIMITS.sourceBytes + 1)).toThrow('256 MiB');
     expect(() => assertSourceSize(LIMITS.sourceBytes)).not.toThrow();
+  });
+  it('accepts ten minutes and rejects longer or unreadable video durations', () => {
+    expect(() => assertVideoDuration(121)).not.toThrow();
+    expect(() => assertVideoDuration(600)).not.toThrow();
+    expect(() => assertVideoDuration(600.05)).not.toThrow();
+    expect(() => assertVideoDuration(600.2)).toThrow('10 minutes');
+    for (const value of [0, -1, NaN, Infinity]) expect(() => assertVideoDuration(value)).toThrow('duration');
+  });
+  it('uses a separate, larger limit for the framed output', () => {
+    expect(() => assertOutputSize(LIMITS.sourceBytes + 1)).not.toThrow();
+    expect(() => assertOutputSize(LIMITS.outputBytes)).not.toThrow();
+    expect(() => assertOutputSize(LIMITS.outputBytes + 1)).toThrow('512 MiB');
   });
 });

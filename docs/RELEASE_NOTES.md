@@ -1,3 +1,22 @@
+# v1.1.0 — Ten-minute videos
+
+Published November 20, 2026.
+
+- Extend video exports to ten minutes, with 256 MiB input and 512 MiB output limits.
+- Assemble regular fast-start MP4 output from bounded chunks while retaining original compatible AAC audio.
+- Show source-download progress and allow cancellation and retry before export.
+- Add a configurable long-video acceptance test with active export cancellation, retry, audio packet comparison, and first/middle/final playback checks.
+
+Start with 720p for longer videos and keep the tab open until the download starts. Desktop Chrome and Edge with H.264/WebCodecs support remain the video target; maximum sizes and device compatibility still apply.
+
+Verification: all 83 tests, TypeScript, and the production build passed. A full ten-minute H.264/AAC test exported successfully at 1440 × 1746, preserved all 28,125 AAC packet payloads, and passed beginning/middle/ending frame checks, cancellation, and retry. See [verification](VERIFICATION.md) for details and [the roadmap](LONGER_VIDEOS.md) for the next step toward practical disk-space limits.
+
+[Open XFrame Downloader](https://ichigoteguz.github.io/XFrame-Downloader/).
+
+Developed with OpenAI Codex.
+
+---
+
 # v1.0.1 — Emoji export fix
 
 Published November 20, 2026.

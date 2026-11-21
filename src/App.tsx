@@ -10,7 +10,8 @@ import { loadPost } from './provider';
 import { allMedia, BACKGROUNDS, firstMotion, getSelectedMedia, PostFrameView } from './PostCard';
 import { captureFrame, getFrameDimensions } from './render';
 import { exportVideo, fetchVideo, inspectVideo } from './video';
-import type { VideoInfo } from './video';
+import { VIDEO_DURATION_LIMIT } from './videoLimits';
+import type { VideoDownloadProgress, VideoInfo } from './video';
 
 const STORAGE_KEY = 'xframe-downloader.settings.v1';
 function storedSettings(): ExportSettings {
@@ -57,31 +58,34 @@ export default function App() {
   const [dimensions, setDimensions] = useState('');
   const [help, setHelp] = useState(false);
   const [videoSource, setVideoSource] = useState<{ key: string; blob: Blob; info: VideoInfo; url: string } | null>(null);
-  const [videoCheck, setVideoCheck] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [videoCheck, setVideoCheck] = useState<'idle' | 'loading' | 'ready' | 'error' | 'canceled'>('idle');
+  const [downloadProgress, setDownloadProgress] = useState<VideoDownloadProgress>({ loaded: 0 });
+  const [videoAttempt, setVideoAttempt] = useState(0);
   const exportRef = useRef<HTMLDivElement>(null);
   const taskRef = useRef<AbortController | null>(null);
+  const videoTaskRef = useRef<AbortController | null>(null);
   const busy = phase !== 'idle';
   const mediaList = allMedia(post);
   const selectedMedia = getSelectedMedia(post, selection);
   const hasVideo = selectedMedia && selectedMedia.type !== 'photo';
   const videoMode = mode === 'video' && !!hasVideo;
-  const browserSupportsVideo = typeof VideoEncoder !== 'undefined' && typeof OffscreenCanvas !== 'undefined';
+  const browserSupportsVideo = typeof VideoEncoder !== 'undefined' && typeof VideoDecoder !== 'undefined' && typeof OffscreenCanvas !== 'undefined';
   const videoKey = videoMode && !demo && selectedMedia ? `${post.id}:${selection?.postId}:${selectedMedia.id}:${settings.videoQuality}` : undefined;
   const readyVideo = videoSource && videoSource.key === videoKey ? videoSource : null;
   useEffect(() => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch { /* Preferences are optional. */ } }, [settings]);
   useEffect(() => () => taskRef.current?.abort(), []);
   useEffect(() => {
     const controller = new AbortController();
+    videoTaskRef.current = controller;
     let sourceUrl: string | undefined;
     setVideoSource(null);
     if (!videoKey || !selectedMedia || !browserSupportsVideo) { setVideoCheck('idle'); return () => controller.abort(); }
-    setVideoCheck('loading'); setError('');
+    setVideoCheck('loading'); setError(''); setNotice(''); setDownloadProgress({ loaded: 0 });
     void (async () => {
       try {
-        const source = await fetchVideo(selectedMedia, settings.videoQuality, controller.signal);
+        const source = await fetchVideo(selectedMedia, settings.videoQuality, controller.signal, value => { if (!controller.signal.aborted) setDownloadProgress(value); });
         const info = await inspectVideo(source);
         if (controller.signal.aborted) return;
-        if (info.duration > LIMITS.videoSeconds + .1) throw new Error('This first version supports videos up to 2 minutes. Choose another attachment or export a still image.');
         sourceUrl = URL.createObjectURL(source);
         setVideoSource({ key: videoKey, blob: source, info, url: sourceUrl });
         setVideoCheck('ready');
@@ -89,13 +93,13 @@ export default function App() {
         if (!controller.signal.aborted) { setVideoCheck('error'); setError(e instanceof Error ? e.message : 'The selected video could not be prepared. Reload the post or choose another quality.'); }
       }
     })();
-    return () => { controller.abort(); if (sourceUrl) URL.revokeObjectURL(sourceUrl); };
-  }, [videoKey, selectedMedia, settings.videoQuality, browserSupportsVideo]);
+    return () => { controller.abort(); if (videoTaskRef.current === controller) videoTaskRef.current = null; if (sourceUrl) URL.revokeObjectURL(sourceUrl); };
+  }, [videoKey, selectedMedia, settings.videoQuality, browserSupportsVideo, videoAttempt]);
   useEffect(() => {
     const node = exportRef.current;
     if (!node) return;
     const update = () => {
-      if (videoMode && !readyVideo) { setDimensions(videoCheck === 'error' ? 'Video unavailable' : demo ? 'Load a video post' : !browserSupportsVideo ? 'Video not supported' : 'Checking video…'); return; }
+      if (videoMode && !readyVideo) { setDimensions(videoCheck === 'error' ? 'Video unavailable' : videoCheck === 'canceled' ? 'Video canceled' : demo ? 'Load a video post' : !browserSupportsVideo ? 'Video not supported' : 'Checking video…'); return; }
       try { const size = getFrameDimensions(node, settings, videoMode && readyVideo ? { videoMode: true, videoSize: readyVideo.info } : {}); setDimensions(`${size.width.toLocaleString()} × ${size.height.toLocaleString()} px`); } catch (e) { setDimensions(e instanceof Error ? e.message : 'Layout is too large'); }
     };
     const observer = new ResizeObserver(update); observer.observe(node); update();
@@ -114,7 +118,8 @@ export default function App() {
     finally { if (taskRef.current === controller) { taskRef.current = null; setPhase('idle'); } }
   }
   async function save() {
-    if (busy || !exportRef.current || (videoMode && !readyVideo)) return;
+    if (busy || !exportRef.current) return;
+    if (videoMode && !readyVideo) { if (videoCheck === 'error' || videoCheck === 'canceled') setVideoAttempt(value => value + 1); return; }
     const controller = new AbortController(); taskRef.current = controller;
     setPhase('preparing'); setError(''); setNotice(''); setProgress(0);
     try {
@@ -133,7 +138,15 @@ export default function App() {
     } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'Export failed. Try a smaller layout or lower quality.'); }
     finally { if (taskRef.current === controller) { taskRef.current = null; setPhase('idle'); } }
   }
-  function cancel() { taskRef.current?.abort(); setNotice('Canceled. You can start another export.'); }
+  function cancel() {
+    if (!busy && videoCheck === 'loading') { videoTaskRef.current?.abort(); setVideoCheck('canceled'); }
+    else taskRef.current?.abort();
+    setNotice('Canceled. You can try again when you’re ready.');
+  }
+  const downloading = !busy && videoMode && videoCheck === 'loading';
+  const retryVideo = videoMode && (videoCheck === 'error' || videoCheck === 'canceled');
+  const downloadPercent = downloadProgress.total ? Math.min(100, Math.round(downloadProgress.loaded / downloadProgress.total * 100)) : undefined;
+  const downloadLabel = downloadProgress.loaded ? `Loading video ${downloadPercent !== undefined ? `${downloadPercent}%` : `${(downloadProgress.loaded / 1024 / 1024).toFixed(1)} MiB`}` : 'Loading video…';
   return <div className="app-shell">
     <header className="site-header"><Brand/><nav aria-label="Main navigation"><label className="site-theme-control">{siteTheme === 'dark' ? <Moon size={16}/> : <Sun size={16}/>}<span className="sr-only">Site theme</span><select aria-label="Site theme" value={siteTheme} onChange={event => setSiteTheme(event.target.value as SiteTheme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><button className="nav-help" onClick={() => setHelp(value => !value)}><CircleHelp size={15}/>How it works</button><a href="https://github.com/ichigoteguz/XFrame-Downloader" target="_blank" rel="noreferrer"><Github size={17}/><span>View on GitHub</span><ExternalLink size={12}/></a></nav></header>
     <main>
@@ -141,7 +154,7 @@ export default function App() {
       <div className="intro-art" aria-hidden="true"><img className="hero-art-light" src={`${import.meta.env.BASE_URL}art/precision-studio.jpg`} alt="" width="1200" height="896" fetchPriority="high"/><img className="hero-art-dark" src={`${import.meta.env.BASE_URL}art/night-signal.jpg`} alt="" width="1200" height="896" decoding="async"/></div>
       <form className="url-form" onSubmit={load}><Link2 size={19}/><label className="sr-only" htmlFor="post-url">X or Twitter post URL</label><input id="post-url" type="url" value={url} onChange={event => setUrl(event.target.value)} placeholder="Paste an X / Twitter post link…" required disabled={busy} autoComplete="off" spellCheck={false}/><button type="submit" disabled={busy || !url.trim()}>{phase === 'loading' ? <LoaderCircle size={17} className="spin"/> : null}<span>{phase === 'loading' ? 'Loading…' : 'Load post'}</span>{phase !== 'loading' && <ArrowRight size={17}/>}</button></form>
       <div className="url-hint">Public posts only. No sign-in. No watermark.</div>
-      {help && <div className="help-panel"><button aria-label="Close help" onClick={() => setHelp(false)}><X size={17}/></button><b>One link. A little context. Ready to share.</b><p>Copy the link to a public X post, paste it above, and choose your look. Pick a single video to give it the full media area, then download an MP4 with the post around it. Photos and text-only posts download as images.</p><p>Posts load through FxTwitter. Your downloads are created on your device. Video export is designed for desktop Chrome and Edge and supports clips up to two minutes.</p></div>}
+      {help && <div className="help-panel"><button aria-label="Close help" onClick={() => setHelp(false)}><X size={17}/></button><b>One link. A little context. Ready to share.</b><p>Copy the link to a public X post, paste it above, and choose your look. Pick a single video to give it the full media area, then download an MP4 with the post around it. Photos and text-only posts download as images.</p><p>Posts load through FxTwitter. Your downloads are created on your device. Video export is designed for desktop Chrome and Edge and supports clips up to {VIDEO_DURATION_LIMIT}. Larger files take longer; keep this tab open until the download starts.</p></div>}
       </section>
       <div className="workspace-heading"><div><span className="tiny-dot"/>YOUR STUDIO</div><span>{demo ? 'A little preview of what’s possible' : `@${post.author.handle} · Post loaded`}</span></div>
       <section className="workspace" aria-label="Post customization studio">
@@ -150,7 +163,7 @@ export default function App() {
           <div className="settings-section"><div className="control-label">POST THEME</div><Options label="Post theme" value={settings.theme} values={[{ value: 'light', label: 'Light', icon: <Sun size={14}/> }, { value: 'dim', label: 'Dim', icon: <Moon size={14}/> }, { value: 'dark', label: 'Dark', icon: <span className="theme-dot"/> }]} onChange={value => update('theme', value)} disabled={busy}/></div>
           <div className="settings-section"><div className="control-label">BACKGROUND<span>{settings.background === 'none' ? 'None' : settings.background[0].toUpperCase() + settings.background.slice(1)}</span></div><div className="background-grid" role="group" aria-label="Background">{(Object.keys(BACKGROUNDS) as Background[]).map(background => <button key={background} aria-label={`Background ${background}`} title={background[0].toUpperCase() + background.slice(1)} aria-pressed={settings.background === background} disabled={busy} onClick={() => update('background', background)} className={`background-swatch ${background === 'none' ? 'no-background' : ''}${background === settings.background ? ' selected' : ''}`} style={{ background: BACKGROUNDS[background] }}>{background === 'none' ? <span/> : settings.background === background ? <Check size={14} strokeWidth={3}/> : null}</button>)}</div></div>
           <div className="settings-section padding-aspect"><div><div className="control-label">PADDING</div><Options label="Padding" value={settings.padding} values={[{ value: 's', label: 'S' }, { value: 'm', label: 'M' }, { value: 'l', label: 'L' }]} onChange={value => update('padding', value)} disabled={busy || settings.background === 'none'}/></div><div><div className="control-label">ASPECT RATIO</div><Options label="Aspect ratio" className="aspect-options" value={settings.aspect} values={[{ value: 'auto', label: 'Auto' }, { value: '1:1', label: '1:1' }, { value: '4:5', label: '4:5' }, { value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }]} onChange={value => update('aspect', value)} disabled={busy || settings.background === 'none'}/></div>{settings.background === 'none' && <p className="control-note"><Crop size={12}/>Add a background to set padding and ratio.</p>}</div>
-          <div className="settings-section output-settings">{videoMode ? <><div className="control-label">VIDEO QUALITY</div><Options label="Video quality" value={settings.videoQuality} values={[{ value: 720, label: '720p · Fast' }, { value: 1080, label: '1080p' }]} onChange={value => update('videoQuality', value)} disabled={busy}/><div className="output-caption"><span className="file-chip">MP4</span>Full video · Original audio</div></> : <><div className="control-label">FORMAT</div><Options label="Image format" value={settings.format} values={[{ value: 'png', label: 'PNG' }, { value: 'jpg', label: 'JPG' }]} onChange={value => update('format', value)} disabled={busy}/><div className="control-label resolution-label">RESOLUTION</div><Options label="Image resolution" value={settings.scale} values={[{ value: 2, label: '2×' }, { value: 3, label: '3×' }, { value: 4, label: '4×' }]} onChange={value => update('scale', value)} disabled={busy}/></>}</div>
+          <div className="settings-section output-settings">{videoMode ? <><div className="control-label">VIDEO QUALITY</div><Options label="Video quality" value={settings.videoQuality} values={[{ value: 720, label: '720p · Fast' }, { value: 1080, label: '1080p' }]} onChange={value => update('videoQuality', value)} disabled={busy}/><div className="output-caption"><span className="file-chip">MP4</span>Full video · Original audio</div><p className="control-note">Up to {VIDEO_DURATION_LIMIT} · {LIMITS.sourceBytes / 1024 / 1024} MiB input · {LIMITS.outputBytes / 1024 / 1024} MiB output. Start with 720p for longer videos.</p></> : <><div className="control-label">FORMAT</div><Options label="Image format" value={settings.format} values={[{ value: 'png', label: 'PNG' }, { value: 'jpg', label: 'JPG' }]} onChange={value => update('format', value)} disabled={busy}/><div className="control-label resolution-label">RESOLUTION</div><Options label="Image resolution" value={settings.scale} values={[{ value: 2, label: '2×' }, { value: 3, label: '3×' }, { value: 4, label: '4×' }]} onChange={value => update('scale', value)} disabled={busy}/></>}</div>
           <div className="local-note"><ShieldCheck size={17}/><div><b>Yours, from start to finish.</b><span>Files are made locally in your browser.</span></div></div>
         </aside>
         <div className="preview-panel"><div className="preview-toolbar"><div><span className="preview-dot"/>Live preview{demo && <span className="sample-label">SAMPLE POST</span>}</div><span className="preview-size"><Maximize size={13}/>{dimensions.length < 35 ? dimensions : 'Large layout'}</span></div>
@@ -159,7 +172,7 @@ export default function App() {
           <div className="preview-bottom"><span><Check size={14}/>No watermark. Just the post.</span><span>{videoMode ? <><Clapperboard size={14}/>Framed video</> : <><ImageIcon size={14}/>High-resolution image</>}</span></div>
         </div>
       </section>
-      <section className="download-bar" aria-label="Download export"><div className="export-summary"><span className="export-icon">{videoMode ? <Film size={20}/> : <ImageIcon size={20}/>}</span><div><b>{videoMode ? 'A video worth keeping in context.' : 'A post worth keeping.'}</b><span>{videoMode ? `MP4 · ${settings.videoQuality}p media · Audio preserved` : `${settings.format.toUpperCase()} · ${settings.scale}× resolution`}{dimensions.length < 35 ? ` · ${dimensions}` : ''}</span></div></div><div className="download-actions">{busy && <button className="cancel-button" onClick={cancel}>Cancel</button>}<button className="download-button" onClick={save} disabled={busy || (videoMode && !readyVideo)}>{busy || (videoMode && videoCheck === 'loading') ? <LoaderCircle className="spin" size={18}/> : <ArrowDownToLine size={18}/>}<span>{phase === 'loading' ? 'Loading post…' : phase === 'preparing' ? 'Preparing…' : phase === 'exporting' ? `Exporting ${Math.round(progress * 100)}%` : videoMode && videoCheck === 'loading' ? 'Checking video…' : `Download ${videoMode ? 'video' : 'image'}`}</span>{!busy && <span className="download-extension">{videoMode ? '.mp4' : `.${settings.format}`}</span>}</button></div>{phase === 'exporting' && <div className="export-progress" role="progressbar" aria-label="Video export progress" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${progress * 100}%` }}/></div>}</section>
+      <section className="download-bar" aria-label="Download export"><div className="export-summary"><span className="export-icon">{videoMode ? <Film size={20}/> : <ImageIcon size={20}/>}</span><div><b>{videoMode ? 'A video worth keeping in context.' : 'A post worth keeping.'}</b><span>{videoMode ? `MP4 · ${settings.videoQuality}p media · Audio preserved` : `${settings.format.toUpperCase()} · ${settings.scale}× resolution`}{dimensions.length < 35 ? ` · ${dimensions}` : ''}</span></div></div><div className="download-actions">{(busy || downloading) && <button className="cancel-button" onClick={cancel}>Cancel</button>}<button className="download-button" onClick={save} disabled={busy || (videoMode && !readyVideo && !retryVideo)}>{busy || (videoMode && videoCheck === 'loading') ? <LoaderCircle className="spin" size={18}/> : <ArrowDownToLine size={18}/>}<span>{phase === 'loading' ? 'Loading post…' : phase === 'preparing' ? 'Preparing…' : phase === 'exporting' ? `Exporting ${Math.round(progress * 100)}%` : videoMode && videoCheck === 'loading' ? downloadLabel : retryVideo ? 'Retry video' : `Download ${videoMode ? 'video' : 'image'}`}</span>{!busy && <span className="download-extension">{videoMode ? '.mp4' : `.${settings.format}`}</span>}</button></div>{downloading && downloadPercent !== undefined && <div className="export-progress" role="progressbar" aria-label="Video download progress" aria-valuenow={downloadPercent} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${downloadPercent}%` }}/></div>}{phase === 'exporting' && <div className="export-progress" role="progressbar" aria-label="Video export progress" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${progress * 100}%` }}/></div>}</section>
       <div className="status-area" aria-live="polite">{error && <div className="status-message error" role="alert"><CircleHelp size={17}/><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss error"><X size={15}/></button></div>}{notice && <div className="status-message success"><Check size={17}/>{notice}</div>}{!error && !notice && demo && videoMode && <p>Paste a post link to export its video. You can try an image download with this sample.</p>}{!error && !notice && !demo && videoMode && !browserSupportsVideo && <p>Video export needs desktop Chrome or Edge with H.264 support. Image export is still available.</p>}{!error && dimensions.length >= 35 && <p className="dimension-warning">{dimensions}</p>}</div>
       <div className="features-row"><div><span className="feature-number">01</span><b>Paste a post</b><span>Bring the link. We’ll bring the context.</span></div><div><span className="feature-number">02</span><b>Find your frame</b><span>Your theme, your background, your style.</span></div><div><span className="feature-number">03</span><b>Keep it moving</b><span>Download an image or a framed video.</span></div></div>
     </main><footer className="site-footer"><div className="footer-brand"><BrandMark/>XFrame Downloader<span>Keep the whole post.</span></div><span className="footer-credit">Developed with OpenAI Codex</span><a href="https://docs.fxembed.com/api/introduction/" target="_blank" rel="noreferrer">Post data by FxTwitter<ArrowRight size={12}/></a></footer>

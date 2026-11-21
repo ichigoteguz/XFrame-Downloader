@@ -2,6 +2,21 @@
 
 Implementation and browser validation began November 9, 2026 (America/New_York).
 
+## Ten-minute video milestone — November 20, 2026
+
+The checks below were performed locally before the v1.1.0 release. GitHub Actions tests, builds, and deploys the release commit to GitHub Pages.
+
+- Raised application guardrails to 600 seconds, 256 MiB input, and 512 MiB output. Replaced the worker's growing contiguous output buffer with seekable 1 MiB chunks and paged Blob storage. Regular fast-start MP4, AAC passthrough, and pixel limits are preserved.
+- All 83 unit tests, TypeScript, and the production build passed. Tests cover input limits with and without Content-Length, canceled stalled downloads and retry, duration boundaries, paged header rewrites, sparse writes, regular MP4 mux/parse, and actual Conversion failure at the output cap.
+- The in-app Chromium 158 browser generated a 600-second 1280 × 720 H.264/AAC source (161,634,963 bytes), canceled export after 5% progress, then successfully exported the complete source to a 1440 × 1746 regular H.264/AAC MP4 (191,830,074 bytes). Source generation took 59.445 seconds and full export 138.740 seconds; the complete test took 206.765 seconds. Timings describe this fixture and computer, not general performance.
+- All 28,125 encoded AAC packet payloads matched the source. An independent packet scan found all 18,000 video packets, from timestamp 0 through 599.9667 seconds. Audio synchronization was not instrumented.
+- Visual review exposed a stale first-frame canvas texture after an HTMLVideo seek to the ending. The exported video was correct. The harness now extracts canonical stills through Mediabunny CanvasSink, validates decoded timestamps, and records browser seek diagnostics separately. Independent verification of the downloaded ten-minute MP4 decoded frames at 0.1, 300, and 599.8 seconds; clocks visibly read 00:00.10, 05:00.00, and 09:59.80. Browser seeks reached each requested time with readyState 4 and a seekable range of 0–600 seconds. Original source audio comparison belongs to the full export run, not this separate file-verification pass.
+- The short smoke test also covers silent portrait input, repeated export, PNG, and JPEG. The actual emoji regression post exported through the main studio at 810 × 1606 pixels, confirming provider retrieval, source loading, static capture, worker composition, and download initiation remain functional.
+
+Reports and images are retained under ignored .qa/: long-video-ten-minute-report.json, long-video-decoded-report.json, long-video-first.png, long-video-middle.png, and long-video-final.png. The full output was downloaded separately to long-video-output.mp4 because the dev artifact endpoint deliberately skips MP4 files above 128 MiB. The benchmark and artifact endpoint are absent from production builds.
+
+Input and output still use browser-managed Blob storage. Total RAM was not instrumented; maximum-size inputs/outputs, high-motion 1080p, standalone browsers, and phones were not validated. See [the roadmap](LONGER_VIDEOS.md) for disk-backed input/output, cleanup, and quota handling before increasing the duration limit again.
+
 ## Emoji export regression — November 20, 2026
 
 Reproduced `URI malformed` on the public site when exporting post `2123796985161322997`. Its ordinary-post display range `[0, 35]` counts Unicode code points. Treating that range as UTF-16 truncated the three trailing laughing emojis to one emoji and an unpaired surrogate, which failed during SVG URI encoding in `html-to-image`.

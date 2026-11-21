@@ -1,6 +1,6 @@
 # XFrame Downloader
 
-**Stable release: [v1.0.1](https://github.com/ichigoteguz/XFrame-Downloader/releases/tag/v1.0.1).**
+**Stable release: [v1.1.0](https://github.com/ichigoteguz/XFrame-Downloader/releases/tag/v1.1.0).**
 
 Keep the whole post. Export public X/Twitter posts as images, or download a video playing inside its original post frame.
 
@@ -16,12 +16,12 @@ The repository and GitHub Pages path are now `XFrame-Downloader`, matching the p
 
 ## Features
 
-- Text, photos, quoted posts, and framed MP4 video with audio.
+- Text, photos, quoted posts, and framed MP4 video up to 10 minutes with audio.
 - Select one video and give it the complete media area; other attachments are omitted from that export.
 - System, Light (Precision Studio), and Dark (Night Signal) site themes, with distinct artwork and layouts, remembered on this device and independent of the exported card.
 - Light, Dim, and Dark cards; solid and gradient backgrounds; padding and aspect-ratio controls.
 - PNG and JPG images at 2×, 3×, or 4×; 720p Fast and 1080p video presets.
-- Live preview, exact output dimensions, progress, and cancellation.
+- Live preview, exact output dimensions, download/export progress, cancellation, and source-download retry.
 - Animated GIF attachments supplied as MP4 use the video export path.
 
 Video preset names describe the moving media inside the card. The complete MP4 includes the surrounding text and frame, so its dimensions can be larger. Video is never cropped or enlarged beyond its source resolution. PNG can preserve transparency; JPEG and MP4 are opaque.
@@ -47,7 +47,9 @@ pnpm preview
 
 Desktop Chromium browsers with WebCodecs H.264 support are the video target. Codec availability depends on the device and browser; image exports remain available when video encoding is unsupported. Phone video export is not a launch guarantee.
 
-Initial application guardrails: 120-second videos, 100 MiB input, 30 fps output, 4 million output pixels and 4096 pixels per side. Image exports allow 16 million pixels and 8192 pixels per side. These are application limits, not universal browser limits. Oversized combinations are rejected rather than silently resized.
+Application guardrails: 10-minute videos, 256 MiB input, 512 MiB output, 30 fps output, 4 million output pixels and 4096 pixels per side. Image exports allow 16 million pixels and 8192 pixels per side. These are application limits, not universal browser limits. Oversized combinations are rejected rather than silently resized. Start with 720p for longer videos and keep the tab open until the download starts.
+
+Encoded output is assembled from bounded chunks with support for normal MP4 metadata rewrites, avoiding one growing JavaScript buffer. The complete input and output still use browser-managed Blob storage, so these limits do not guarantee a particular amount of RAM or support for every device. Input download progress, cancellation, and retry are available. [The longer-video roadmap](docs/LONGER_VIDEOS.md) describes the next step toward practical limits based on disk space.
 
 Only public posts are supported. Deleted, protected, restricted, external-player, and live-broadcast content may be unavailable. FxTwitter is an unofficial external dependency and can change or become unavailable. No X credentials are requested. Full threads, batch exports, trimming, WebM, and GIF output are outside this version.
 
@@ -59,10 +61,10 @@ The repository is public and the app is hosted on GitHub Pages. The actual workf
 
 ## Architecture
 
-The provider adapter normalizes FxTwitter v2 into application-owned types. React/CSS owns the shared post layout. `html-to-image` rasterizes the frame once; a dedicated Mediabunny/WebCodecs worker draws decoded video samples into the measured rounded media rectangle and creates H.264 MP4 while preserving compatible AAC audio. Cancellation terminates the export worker. Preferences are stored locally; source media and exports are temporary browser memory.
+The provider adapter normalizes FxTwitter v2 into application-owned types. React/CSS owns the shared post layout. `html-to-image` rasterizes the frame once; a dedicated Mediabunny/WebCodecs worker draws decoded video samples into the measured rounded media rectangle and creates H.264 MP4 while preserving compatible AAC audio. A seekable chunked output target preserves regular fast-start MP4 and enforces the output limit before retaining each chunk. Cancellation terminates the export worker. Preferences are stored locally; source media and exports use temporary browser-managed Blob storage.
 
 ## Development acceptance test
 
-Run the dev server and open `/XFrame-Downloader/?benchmark`. The development-only harness generates a synthetic H.264/AAC source, captures a dark frame plus quote, exports an MP4, verifies duration/audio/dimensions, and extracts first/middle/final playback frames. Local artifacts are saved under ignored `.qa/` by a dev-server-only endpoint. The harness and artifact endpoint are absent from the production app.
+Run the dev server and open `/XFrame-Downloader/?benchmark`. The development-only harness offers three-second, two-minute, and configurable tests up to ten minutes. It generates a synthetic H.264/AAC source, captures a dark frame plus quote, cancels an active export, retries, verifies duration/audio/dimensions, and extracts first/middle/final playback frames. Local artifacts are saved under ignored `.qa/` by a dev-server-only endpoint; output above 128 MiB is verified in the browser without copying the full MP4 to that endpoint. The harness and artifact endpoint are absent from the production app.
 
 See [verification notes](docs/VERIFICATION.md) for measured results and remaining limitations. Dependency licenses and source links are listed in [third-party notices](THIRD_PARTY_NOTICES.md).
