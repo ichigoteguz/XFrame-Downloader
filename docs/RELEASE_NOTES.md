@@ -1,3 +1,17 @@
+# v1.1.1 — Post text rendering fix
+
+Published November 21, 2026.
+
+- Fixed ampersands appearing as `&amp;` in post previews and exports. The app decodes X's text escapes while preserving link and formatting positions.
+
+All 86 tests, TypeScript, and the production build passed. The [reported post](https://x.com/YaseenK7212/status/2124099643797836028) rendered with the correct ampersand in the shared post card.
+
+[Open XFrame Downloader](https://ichigoteguz.github.io/XFrame-Downloader/).
+
+Developed with OpenAI Codex.
+
+---
+
 # v1.1.0 — Ten-minute videos
 
 Published November 20, 2026.

@@ -7,6 +7,7 @@ const number = (value: unknown, fallback = 0) => typeof value === 'number' && Nu
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const POST_HOSTS = new Set(['x.com', 'www.x.com', 'mobile.x.com', 'twitter.com', 'www.twitter.com', 'mobile.twitter.com']);
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+const X_TEXT_ESCAPES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>' };
 
 export const FALLBACK_AVATAR = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><rect width="96" height="96" rx="48" fill="#343b40"/><circle cx="48" cy="36" r="16" fill="#9aa3aa"/><path d="M18 88c0-19 12-31 30-31s30 12 30 31" fill="#9aa3aa"/></svg>')}`;
 
@@ -64,7 +65,8 @@ function safeLink(value: unknown): string | undefined {
 
 function normalizeText(status: Json): Pick<Post, 'text' | 'facets'> {
   const raw = object(status.raw_text);
-  const source = string(raw.text, string(status.text));
+  const rawText = typeof raw.text === 'string' ? raw.text : undefined;
+  const source = rawText ?? string(status.text);
   const display = array(raw.display_text_range);
   // FxTwitter passes through X's code-point display range for ordinary posts,
   // but synthesizes a full UTF-16 range for note posts.
@@ -104,6 +106,13 @@ function normalizeText(status: Json): Pick<Post, 'text' | 'facets'> {
       originalFacets.push({ start, end, type: 'link', url });
     } else if (kind === 'mention' || kind === 'hashtag' || kind === 'bold' || kind === 'italic') {
       originalFacets.push({ start, end, type: kind, ...(url ? { url } : {}) });
+    }
+  }
+  // Apply character references as edits so offsets still refer to X's raw text.
+  if (rawText !== undefined) {
+    for (const match of rawText.slice(viewStart, viewEnd).matchAll(/&(?:amp|lt|gt);/g)) {
+      const start = viewStart + match.index;
+      edits.push({ start, end: start + match[0].length, text: X_TEXT_ESCAPES[match[0]] });
     }
   }
   edits.sort((a, b) => a.start - b.start);

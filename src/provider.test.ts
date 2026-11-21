@@ -12,6 +12,35 @@ describe('post URL handling', () => {
 });
 
 describe('provider normalization', () => {
+  it('decodes the ampersand in post 2124099643797836028', () => {
+    const text = 'All GTA Characters in one video laughing at lucia & jason\n\nThis AI video is insane 🔥\n\nSeedance 2.5';
+    const rawText = `${text.replace('&', '&amp;')} https://t.co/c95bdnQGSN`;
+    const result = normalizePost(rawPost({ id: '2124099643797836028', text, raw_text: {
+      text: rawText,
+      display_text_range: [0, 102],
+      facets: [{ type: 'media', indices: [103, 126], original: 'https://t.co/c95bdnQGSN' }],
+    } }));
+    expect(result.text).toBe(text);
+  });
+  it('maps facets after decoding raw text once', () => {
+    const text = '🔥 &lt;3 &amp; &amp;gt; #hello https://t.co/link';
+    const hashtag = [...text.slice(0, text.indexOf('#'))].length;
+    const link = [...text.slice(0, text.indexOf('https:'))].length;
+    const result = normalizePost(rawPost({ raw_text: {
+      text,
+      facets: [
+        { type: 'hashtag', indices: [hashtag, hashtag + 6] },
+        { type: 'url', indices: [link, [...text].length], original: 'https://t.co/link', display: 'example.com', replacement: 'https://example.com/?x=1&y=2' },
+      ],
+    } }));
+    expect(result.text).toBe('🔥 <3 & &gt; #hello example.com');
+    expect(result.facets.map(facet => result.text.slice(facet.start, facet.end))).toEqual(['#hello', 'example.com']);
+    expect(result.facets[1].url).toBe('https://example.com/?x=1&y=2');
+  });
+  it('preserves literal entity spellings in provider display text', () => {
+    const text = 'Write &amp; for an ampersand.';
+    expect(normalizePost(rawPost({ text })).text).toBe(text);
+  });
   it('preserves all three emoji in post 2123796985161322997 without breaking export encoding', () => {
     const text = 'Que maravilla de publicidad... \n🤣🤣🤣';
     const result = normalizePost(rawPost({ id: '2123796985161322997', text, is_note_tweet: false, raw_text: { text: `${text} https://t.co/rvm7b3Mc3V`, display_text_range: [0, 35], facets: [{ type: 'media', indices: [36, 59], original: 'https://t.co/rvm7b3Mc3V' }] } }));
