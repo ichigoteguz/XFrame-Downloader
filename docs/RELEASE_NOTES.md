@@ -1,3 +1,18 @@
+# v1.1.2 — Translated post links
+
+Published November 22, 2026.
+
+- Accept X and Twitter post links with a two-letter translation suffix, such as `/en`.
+- Show the translated text first in previews and exports, label the source language when available, and place the original text below. If no translation is available, show the original post.
+
+All 88 tests, TypeScript, and the production build passed. The [reported post](https://x.com/kenzoma1995/status/2124310644971208818/en) loaded in the browser with the English translation above the original Chinese text.
+
+[Open XFrame Downloader](https://ichigoteguz.github.io/XFrame-Downloader/).
+
+Developed with OpenAI Codex.
+
+---
+
 # v1.1.1 — Post text rendering fix
 
 Published November 21, 2026.

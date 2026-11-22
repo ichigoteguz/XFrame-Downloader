@@ -1,6 +1,6 @@
 # XFrame Downloader
 
-**Stable release: [v1.1.1](https://github.com/ichigoteguz/XFrame-Downloader/releases/tag/v1.1.1).**
+**Stable release: [v1.1.2](https://github.com/ichigoteguz/XFrame-Downloader/releases/tag/v1.1.2).**
 
 Keep the whole post. Export public X/Twitter posts as images, or download a video playing inside its original post frame.
 

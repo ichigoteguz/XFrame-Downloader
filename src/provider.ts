@@ -11,15 +11,19 @@ const X_TEXT_ESCAPES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt
 
 export const FALLBACK_AVATAR = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><rect width="96" height="96" rx="48" fill="#343b40"/><circle cx="48" cy="36" r="16" fill="#9aa3aa"/><path d="M18 88c0-19 12-31 30-31s30 12 30 31" fill="#9aa3aa"/></svg>')}`;
 
-export function parsePostUrl(input: string): string {
+function parsePostLink(input: string): { id: string; language?: string } {
   let url: URL;
   try { url = new URL(input.trim()); } catch { throw new Error('Paste a complete X or Twitter post URL, such as https://x.com/user/status/123.'); }
   if (!['https:', 'http:'].includes(url.protocol) || !POST_HOSTS.has(url.hostname.toLowerCase()) || url.username || url.password || url.port) {
     throw new Error('Use a post link from x.com or twitter.com.');
   }
-  const match = url.pathname.match(/^\/(?:[A-Za-z0-9_]{1,30}\/status|i\/web\/status)\/(\d{1,25})(?:\/(?:photo|video)\/\d+)?\/?$/);
+  const match = url.pathname.match(/^\/(?:[A-Za-z0-9_]{1,30}\/status|i\/web\/status)\/(\d{1,25})(?:\/(?:photo|video)\/\d+)?(?:\/([A-Za-z]{2}))?\/?$/);
   if (!match) throw new Error('That link is not a post. Copy the URL of an individual X post.');
-  return match[1];
+  return { id: match[1], language: match[2]?.toLowerCase() };
+}
+
+export function parsePostUrl(input: string): string {
+  return parsePostLink(input).id;
 }
 
 /** Media is fetched directly from X's media CDN; reject arbitrary provider URLs. */
@@ -182,10 +186,17 @@ export function normalizePost(value: unknown, depth = 0): Post {
   const date = Number.isFinite(timestamp) ? new Date(timestamp * 1000) : new Date(string(status.created_at));
   const poll = object(status.poll);
   const reply = status.replying_to;
+  const translation = object(status.translation);
+  const translatedText = string(translation.text).trim();
   const result: Post = {
     id, url: `https://x.com/${encodeURIComponent(string(author.screen_name))}/status/${id}`,
     author: { name: string(author.name, string(author.screen_name)), handle: string(author.screen_name), avatar: safeMediaUrl(author.avatar_url) || FALLBACK_AVATAR, verified: object(author.verification).verified === true || author.verified === true },
     ...normalizeText(status), createdAt: Number.isNaN(date.getTime()) ? '' : date.toISOString(),
+    ...(translatedText ? { translation: {
+      text: translatedText,
+      language: string(translation.target_lang) || undefined,
+      sourceLanguage: string(translation.source_lang) || undefined,
+    } } : {}),
     media: list.slice(0, 16).flatMap((item, index) => { const itemMedia = normalizeMedia(item, id, index); return itemMedia ? [itemMedia] : []; }),
     ...(reply ? { replyingTo: typeof reply === 'string' ? reply : string(object(reply).screen_name, string(object(object(reply).author).screen_name)) } : {}),
   };
@@ -275,9 +286,11 @@ async function embedAssets(post: Post, signal?: AbortSignal): Promise<void> {
 }
 
 export async function loadPost(input: string, signal?: AbortSignal): Promise<Post> {
-  const id = parsePostUrl(input);
+  const { id, language } = parsePostLink(input);
+  const endpoint = new URL(`https://api.fxtwitter.com/2/status/${id}`);
+  if (language) endpoint.searchParams.set('lang', language);
   try {
-    const payload = await timedRequest(`https://api.fxtwitter.com/2/status/${id}`, signal, async response => {
+    const payload = await timedRequest(endpoint.href, signal, async response => {
       if (!response.ok) throw providerError(response.status);
       try { return object(await response.json()); } catch { throw new Error('The post service returned an unexpected response. Please try again later.'); }
     });

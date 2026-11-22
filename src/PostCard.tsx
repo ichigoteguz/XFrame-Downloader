@@ -22,10 +22,22 @@ export function firstMotion(post: Post): MediaSelection | undefined {
   return item ? { postId: item.postId, mediaId: item.media.id } : undefined;
 }
 
+const languageNames = new Intl.DisplayNames('en', { type: 'language', fallback: 'none' });
+
+function translationLabel(language?: string): string {
+  if (language) {
+    try {
+      const name = languageNames.of(language);
+      if (name) return `Translated from ${name}`;
+    } catch { /* The provider can return a language code that Intl cannot recognize. */ }
+  }
+  return 'Translation';
+}
+
 function PostText({ post }: { post: Post }) {
   const facets = post.facets.filter(f => f.start >= 0 && f.end > f.start && f.end <= post.text.length);
   const breaks = [...new Set([0, post.text.length, ...facets.flatMap(f => [f.start, f.end])])].sort((a, b) => a - b);
-  return <div className="post-text" dir="auto">{breaks.slice(0, -1).map((start, i) => {
+  return <div className="post-text" lang={post.translation?.sourceLanguage} dir="auto">{breaks.slice(0, -1).map((start, i) => {
     const end = breaks[i + 1];
     const active = facets.filter(f => f.start <= start && f.end >= end);
     const link = active.find(f => ['link', 'mention', 'hashtag'].includes(f.type));
@@ -50,7 +62,14 @@ function Card({ post, selection, blankVideo = false, videoUrl, quote = false, de
   return <article className={`post-card${quote ? ' quoted-card' : ''}`}>
     <header className="post-author"><img className="post-avatar" src={post.author.avatar} alt=""/><div className="post-author-label"><div className="post-name">{post.author.name}{post.author.verified && <BadgeCheck className="verified-badge" size={19} aria-label="Verified"/>}</div><div className="post-handle">@{post.author.handle.replace(/^@/, '')}</div></div>{!quote && <XMark/>}</header>
     {post.replyingTo && <p className="post-reply">Replying to <span className="post-link">@{post.replyingTo.replace(/^@/, '')}</span></p>}
-    {post.text && <PostText post={post}/>}
+    {post.translation ? <>
+      <div className="post-translation-label">{translationLabel(post.translation.sourceLanguage)}</div>
+      <div className="post-text" lang={post.translation.language} dir="auto">{post.translation.text}</div>
+      {post.text && <div className="post-original">
+        <div className="post-translation-label">Original text</div>
+        <PostText post={post}/>
+      </div>}
+    </> : post.text && <PostText post={post}/>}
     {items.length > 0 && <div className={`post-media-grid media-count-${Math.min(items.length, 4)}`}>{items.map((media, index) => {
       const isMotion = media.type !== 'photo';
       const selected = selection?.mediaId === media.id && selection.postId === post.id;

@@ -111,6 +111,28 @@ describe('network behavior', () => {
   it('handles HTTP errors before parsing JSON', async () => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Bad gateway', { status: 502 }))); await expect(loadPost('https://x.com/user/status/20')).rejects.toThrow(/temporarily unavailable/); });
   it('handles changed and malformed JSON responses', async () => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not json', { status: 200 }))); await expect(loadPost('https://x.com/user/status/20')).rejects.toThrow(/unexpected response/); });
   it('loads a text post and uses a local avatar fallback', async () => { const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 200, status: rawPost() }))); vi.stubGlobal('fetch', fetch); const post = await loadPost('https://x.com/user/status/20'); expect(post.text).toBe('Hello world'); expect(fetch).toHaveBeenCalledTimes(1); expect(fetch.mock.calls[0][0]).toBe('https://api.fxtwitter.com/2/status/20'); });
+  it('loads the English translation requested by the sample post URL', async () => {
+    const id = '2124310644971208818';
+    const text = '你好';
+    const translation = { text: 'Hello', target_lang: 'en', source_lang: 'zh' };
+    const fetch = vi.fn().mockResolvedValue(Response.json({ code: 200, status: rawPost({ id, text, translation }) }));
+    vi.stubGlobal('fetch', fetch);
+
+    const post = await loadPost(`https://x.com/kenzoma1995/status/${id}/en`);
+
+    expect(fetch.mock.calls[0][0]).toBe(`https://api.fxtwitter.com/2/status/${id}?lang=en`);
+    expect(post).toMatchObject({ id, text, translation: { text: 'Hello', language: 'en', sourceLanguage: 'zh' } });
+  });
+  it('still loads the original post if the requested translation is unavailable', async () => {
+    const fetch = vi.fn().mockResolvedValue(Response.json({ code: 200, status: rawPost() }));
+    vi.stubGlobal('fetch', fetch);
+
+    const post = await loadPost('https://twitter.com/example/status/1903302115721629989/ES/?s=20');
+
+    expect(fetch.mock.calls[0][0]).toBe('https://api.fxtwitter.com/2/status/1903302115721629989?lang=es');
+    expect(post.text).toBe('Hello world');
+    expect(post.translation).toBeUndefined();
+  });
   it('embeds images and does not send credentials', async () => { const fetch = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } })); vi.stubGlobal('fetch', fetch); await expect(loadMediaAsset('https://pbs.twimg.com/a.png')).resolves.toBe('data:image/png;base64,AQID'); expect(fetch.mock.calls[0][1].credentials).toBe('omit'); });
   it('rejects non-image responses and oversized images', async () => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>', { headers: { 'content-type': 'text/html' } }))); await expect(loadMediaAsset('https://pbs.twimg.com/a.png')).rejects.toThrow(/unsupported image/); vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('x', { headers: { 'content-type': 'image/png', 'content-length': String(13 * 1024 * 1024) } }))); await expect(loadMediaAsset('https://pbs.twimg.com/a.png')).rejects.toThrow(/too large/); });
   it('does not replace cancellation with a connection error', async () => { const controller = new AbortController(); controller.abort(); vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('Aborted', 'AbortError'))); await expect(loadPost('https://x.com/user/status/20', controller.signal)).rejects.toHaveProperty('name', 'AbortError'); });
